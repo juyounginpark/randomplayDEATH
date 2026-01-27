@@ -32,9 +32,6 @@ public class PlayerMove : MonoBehaviour
     private Vector3 cachedCameraForward;
     private Vector3 cachedCameraRight;
 
-    // 충돌 방지용
-    private Vector3 lastValidPosition;
-
     void Start()
     {
         // Rigidbody 컴포넌트 가져오기 (있으면)
@@ -55,13 +52,13 @@ public class PlayerMove : MonoBehaviour
 
             // 질량 및 저항 설정
             rb.mass = 1f;
-            rb.linearDamping = 0f;
-            rb.angularDamping = 0.05f;
+            rb.linearDamping = 10f;
+            rb.angularDamping = 999f; // 회전 저항 극대화
 
             // 중력 사용 여부
             rb.useGravity = false;
 
-            Debug.Log("Rigidbody 설정 완료: 회전 고정, 중력 OFF");
+            Debug.Log("Rigidbody 설정 완료: 회전 완전 고정, 중력 OFF");
         }
         else
         {
@@ -157,28 +154,98 @@ public class PlayerMove : MonoBehaviour
         }
     }
 
-    // Knockback Settings
-    [Header("Knockback Settings")]
-    [Tooltip("충돌 시 튕겨나가는 힘")]
-    public float knockbackForce = 5f;
-    [Tooltip("튕겨나가는 시간")]
-    public float knockbackDuration = 0.5f;
-    [Tooltip("충돌 감지 태그")]
-    public string collisionTag = "Map";
+    void LateUpdate()
+    {
+        // FPS 모드에서 회전 강제 고정 (마지막 확인)
+        bool isFirstPerson = cameraMove != null && cameraMove.IsFirstPersonMode;
+        if (isFirstPerson && firstPersonLockedRotation != Quaternion.identity)
+        {
+            transform.rotation = firstPersonLockedRotation;
+        }
+    }
 
-    private bool isKnockback = false;
+
+    private Quaternion firstPersonLockedRotation;
+    private bool wasFirstPerson = false;
 
     void FixedUpdate()
     {
-        // 넉백 중이면 이동 입력 무시 (넉백 루틴에서 이동 처리)
-        if (isKnockback) return;
+        // 1인칭 모드 확인
+        bool isFirstPerson = cameraMove != null && cameraMove.IsFirstPersonMode;
+
+        // 모드 전환 감지
+        if (isFirstPerson != wasFirstPerson)
+        {
+            if (isFirstPerson)
+            {
+                // 1인칭 모드 진입: 현재 회전 잠금
+                firstPersonLockedRotation = transform.rotation;
+                Debug.Log($"FPS 모드 진입 - 회전 잠금: {firstPersonLockedRotation.eulerAngles}");
+            }
+            else
+            {
+                // 3인칭 모드 복귀
+                firstPersonLockedRotation = Quaternion.identity;
+                Debug.Log("3인칭 모드 복귀");
+            }
+            wasFirstPerson = isFirstPerson;
+        }
+
+        // === FPS 모드 전용 로직 ===
+        if (isFirstPerson)
+        {
+            HandleFirstPersonMovement();
+            return;
+        }
+
+        // === 3인칭 모드 전용 로직 ===
+        HandleThirdPersonMovement();
+    }
+
+    /// <summary>
+    /// FPS 모드 이동 처리 - 회전 없이 좌표만 이동
+    /// </summary>
+    private void HandleFirstPersonMovement()
+    {
+        // 매 프레임 회전 강제 고정 (물리 엔진의 회전도 차단)
+        if (rb != null)
+        {
+            rb.MoveRotation(firstPersonLockedRotation);
+        }
+        transform.rotation = firstPersonLockedRotation;
 
         // 이동 방향이 없으면 리턴
         if (moveDirection.sqrMagnitude < 0.0001f)
             return;
 
-        // 1인칭 모드 확인
-        bool isFirstPerson = cameraMove != null && cameraMove.IsFirstPersonMode;
+        // 카메라 시점 기준 좌표 이동만 수행
+        Vector3 movement = moveDirection * moveSpeed * Time.fixedDeltaTime;
+
+        if (rb != null)
+        {
+            Vector3 newPosition = rb.position + movement;
+            newPosition.y = fixedYPosition;
+            rb.MovePosition(newPosition);
+            // 이동 후에도 회전 다시 고정
+            rb.MoveRotation(firstPersonLockedRotation);
+        }
+        else
+        {
+            Vector3 newPosition = transform.position + movement;
+            newPosition.y = fixedYPosition;
+            transform.position = newPosition;
+            transform.rotation = firstPersonLockedRotation;
+        }
+    }
+
+    /// <summary>
+    /// 3인칭 모드 이동 처리 - 이동 방향으로 회전
+    /// </summary>
+    private void HandleThirdPersonMovement()
+    {
+        // 이동 방향이 없으면 리턴
+        if (moveDirection.sqrMagnitude < 0.0001f)
+            return;
 
         // 이동 계산
         Vector3 movement = moveDirection * moveSpeed * Time.fixedDeltaTime;
@@ -198,63 +265,9 @@ public class PlayerMove : MonoBehaviour
             transform.position = newPosition;
         }
 
-        // 3인칭 모드에서만 이동 방향으로 회전
-        // 1인칭 모드에서는 CameraMove에서 플레이어 회전 처리
-        if (!isFirstPerson)
-        {
-            Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
-        }
+        // 이동 방향으로 부드럽게 회전
+        Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
     }
 
-    private void OnCollisionEnter(Collision collision)
-    {
-        // 맵과 충돌 시 넉백
-        if (collision.gameObject.CompareTag(collisionTag) && !isKnockback)
-        {
-            StartCoroutine(KnockbackRoutine(collision.contacts[0].normal));
-        }
-    }
-
-    private System.Collections.IEnumerator KnockbackRoutine(Vector3 hitNormal)
-    {
-        isKnockback = true;
-
-        float timer = 0f;
-        // 충돌 반대 방향 (뒤로) = 법선 벡터 방향 (보통 벽의 normal은 튀어나오는 방향이므로 플레이어에게는 뒤로 가는 방향)
-        // 혹은 단순히 플레이어의 -forward를 쓸 수도 있지만, 충돌 각도에 따라 튕기는게 더 자연스러울 수 있음.
-        // 여기서는 "쭉 뒤로 가"라는 요청에 맞춰 현재 보는 방향의 반대로 설정하거나, 충돌 면의 반대로 설정.
-        // "쭉 뒤로" -> 플레이어의 진행 반대 방향이 가장 직관적일 수 있음.
-        // 하지만 벽에 비스듬히 부딪혔을때 미끄러지는게 아니라 튕겨야 한다면 Normal 활용.
-        // 요청: "플레이어가 쭉 뒤로 가" -> 단순히 -transform.forward 사용 시 회전이 꼬일 수 있음.
-        // 가장 안전한 건 충돌 지점의 Normal 벡터 방향으로 밀어내는 것.
-        
-        Vector3 knockbackDir = hitNormal;
-        knockbackDir.y = 0; // Y축 이동 방지
-        knockbackDir.Normalize();
-
-        while (timer < knockbackDuration)
-        {
-            timer += Time.fixedDeltaTime;
-
-            Vector3 movement = knockbackDir * knockbackForce * Time.fixedDeltaTime;
-
-            if (rb != null)
-            {
-                Vector3 newPosition = rb.position + movement;
-                newPosition.y = fixedYPosition;
-                rb.MovePosition(newPosition);
-            }
-            else
-            {
-                Vector3 newPosition = transform.position + movement;
-                newPosition.y = fixedYPosition;
-                transform.position = newPosition;
-            }
-
-            yield return new WaitForFixedUpdate();
-        }
-
-        isKnockback = false;
-    }
 }

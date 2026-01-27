@@ -51,6 +51,18 @@ public class CameraMove : MonoBehaviour
     [Range(0.1f, 10f)]
     public float rotationSpeed = 3f;
 
+    [Tooltip("회전 부드러움 (높을수록 빠르게 회전)")]
+    [Range(1f, 20f)]
+    public float rotationSmoothness = 8f;
+
+    [Tooltip("수직 회전 최소 각도")]
+    [Range(0f, 89f)]
+    public float minVerticalAngle = 10f;
+
+    [Tooltip("수직 회전 최대 각도")]
+    [Range(0f, 89f)]
+    public float maxVerticalAngle = 80f;
+
     [Header("First Person Rotation Settings")]
     [Tooltip("1인칭 마우스 감도")]
     [Range(0.1f, 10f)]
@@ -67,6 +79,9 @@ public class CameraMove : MonoBehaviour
     private float currentDistance;
     private float targetDistance;
     private float currentHorizontalAngle;
+    private float currentVerticalAngle; // 3인칭 수직 각도 동적 제어
+    private float targetHorizontalAngle; // 목표 수평 각도
+    private float targetVerticalAngle; // 목표 수직 각도
     private float firstPersonVerticalAngle = 0f;
     private float firstPersonHorizontalAngle = 0f;
 
@@ -74,7 +89,9 @@ public class CameraMove : MonoBehaviour
     public bool IsFirstPersonMode { get; private set; } = false;
 
     // 캐싱된 변수들
-    private Vector3 currentVelocity = Vector3.zero;
+    private Vector3 positionVelocity = Vector3.zero;
+    private float horizontalAngleVelocity = 0f;
+    private float verticalAngleVelocity = 0f;
 
     void Start()
     {
@@ -87,9 +104,12 @@ public class CameraMove : MonoBehaviour
 
             // 초기 각도 설정 (아이소메트릭 뷰)
             currentHorizontalAngle = isometricAngleY;
+            currentVerticalAngle = isometricAngleX; // 초기값을 isometricAngleX로 설정
+            targetHorizontalAngle = isometricAngleY;
+            targetVerticalAngle = isometricAngleX;
 
-            // 수직 각도는 고정 (아이소메트릭 뷰 유지)
-            transform.rotation = Quaternion.Euler(isometricAngleX, currentHorizontalAngle, 0f);
+            // 초기 회전 적용
+            transform.rotation = Quaternion.Euler(currentVerticalAngle, currentHorizontalAngle, 0f);
 
             // 초기 거리 설정 (최대 거리로 시작)
             currentDistance = maxDistance;
@@ -149,21 +169,7 @@ public class CameraMove : MonoBehaviour
             firstPersonVerticalAngle -= mouseY * firstPersonSensitivity;
             firstPersonVerticalAngle = Mathf.Clamp(firstPersonVerticalAngle, firstPersonMinVerticalAngle, firstPersonMaxVerticalAngle);
 
-            // 플레이어 수평 회전 동기화 (Rigidbody 고려)
-            if (player != null)
-            {
-                Rigidbody playerRb = player.GetComponent<Rigidbody>();
-                if (playerRb != null)
-                {
-                    // Rigidbody가 있으면 MoveRotation 사용
-                    playerRb.MoveRotation(Quaternion.Euler(0f, firstPersonHorizontalAngle, 0f));
-                }
-                else
-                {
-                    // Rigidbody가 없으면 직접 회전
-                    player.rotation = Quaternion.Euler(0f, firstPersonHorizontalAngle, 0f);
-                }
-            }
+            // 1인칭 모드에서는 플레이어 오브젝트 회전 없음 (시점만 회전)
 
             // 1인칭 카메라 위치 설정
             Vector3 targetPosition;
@@ -179,11 +185,12 @@ public class CameraMove : MonoBehaviour
                 targetPosition = player.position + firstPersonOffset;
             }
 
-            // 부드러운 위치 이동 (1인칭에서도 약간의 부드러움)
-            transform.position = Vector3.Lerp(transform.position, targetPosition, 20f * Time.deltaTime);
+            // 부드러운 위치 이동 (SmoothDamp 사용)
+            transform.position = Vector3.SmoothDamp(transform.position, targetPosition, ref positionVelocity, 0.05f);
 
-            // 카메라 회전 적용 (마우스 입력 기반)
-            transform.rotation = Quaternion.Euler(firstPersonVerticalAngle, firstPersonHorizontalAngle, 0f);
+            // 카메라 회전 적용 (부드러운 회전)
+            Quaternion targetCameraRotation = Quaternion.Euler(firstPersonVerticalAngle, firstPersonHorizontalAngle, 0f);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetCameraRotation, 20f * Time.deltaTime);
         }
         else
         {
@@ -193,6 +200,16 @@ public class CameraMove : MonoBehaviour
                 IsFirstPersonMode = false;
                 // 1인칭 수평 각도를 3인칭으로 이어받기
                 currentHorizontalAngle = firstPersonHorizontalAngle;
+                targetHorizontalAngle = firstPersonHorizontalAngle;
+
+                // 수직 각도는 isometricAngleX로 부드럽게 복귀
+                currentVerticalAngle = isometricAngleX;
+                targetVerticalAngle = isometricAngleX;
+
+                // Velocity 리셋
+                horizontalAngleVelocity = 0f;
+                verticalAngleVelocity = 0f;
+                positionVelocity = Vector3.zero;
 
                 // 마우스 커서 해제
                 Cursor.lockState = CursorLockMode.None;
@@ -201,17 +218,31 @@ public class CameraMove : MonoBehaviour
                 Debug.Log("3인칭 모드로 전환");
             }
 
-            // 마우스 오른쪽 버튼으로 카메라 회전 (XZ 평면에서만)
+            // 마우스 오른쪽 버튼으로 카메라 회전 (자유 시점)
             if (enableMouseRotation && Input.GetMouseButton(1)) // 오른쪽 마우스 버튼
             {
                 float mouseX = Input.GetAxis("Mouse X");
+                float mouseY = Input.GetAxis("Mouse Y");
 
-                // 수평 회전 (Y축) - 부드럽게 적용
-                currentHorizontalAngle += mouseX * rotationSpeed;
+                // 수평 회전 (Y축)
+                targetHorizontalAngle += mouseX * rotationSpeed;
+
+                // 수직 회전 (X축)
+                targetVerticalAngle -= mouseY * rotationSpeed;
+
+                // 각도 제한
+                targetVerticalAngle = Mathf.Clamp(targetVerticalAngle, minVerticalAngle, maxVerticalAngle);
             }
 
-            // 카메라 회전 적용 (수직 각도는 고정, 수평만 회전)
-            transform.rotation = Quaternion.Euler(isometricAngleX, currentHorizontalAngle, 0f);
+            // 각도 정규화 (0-360도 범위)
+            targetHorizontalAngle = Mathf.Repeat(targetHorizontalAngle, 360f);
+
+            // 부드러운 회전 전환 (SmoothDampAngle 사용)
+            currentHorizontalAngle = Mathf.SmoothDampAngle(currentHorizontalAngle, targetHorizontalAngle, ref horizontalAngleVelocity, 1f / rotationSmoothness);
+            currentVerticalAngle = Mathf.SmoothDampAngle(currentVerticalAngle, targetVerticalAngle, ref verticalAngleVelocity, 1f / rotationSmoothness);
+
+            // 카메라 회전 적용 (수직, 수평 모두 적용)
+            transform.rotation = Quaternion.Euler(currentVerticalAngle, currentHorizontalAngle, 0f);
 
             // 오프셋 계산 (현재 거리와 회전 기반)
             Vector3 offset = CalculateOffset();
@@ -219,8 +250,8 @@ public class CameraMove : MonoBehaviour
             // 목표 위치 계산 (플레이어 중앙)
             Vector3 desiredPosition = player.position + offset;
 
-            // 부드러운 이동 (프레임 독립적)
-            transform.position = Vector3.Lerp(transform.position, desiredPosition, smoothSpeed * Time.deltaTime);
+            // 부드러운 이동 (SmoothDamp 사용으로 더 자연스러운 감속/가속)
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, 1f / smoothSpeed);
         }
     }
 
@@ -229,8 +260,8 @@ public class CameraMove : MonoBehaviour
     /// </summary>
     private Vector3 CalculateOffset()
     {
-        // 수직 각도는 고정, 수평 각도만 변경
-        Quaternion rotation = Quaternion.Euler(isometricAngleX, currentHorizontalAngle, 0f);
+        // 수직, 수평 각도 모두 사용하여 회전 계산
+        Quaternion rotation = Quaternion.Euler(currentVerticalAngle, currentHorizontalAngle, 0f);
         Vector3 direction = rotation * Vector3.back; // 카메라가 뒤에서 보도록
 
         return direction * currentDistance;
