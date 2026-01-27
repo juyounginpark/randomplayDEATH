@@ -79,6 +79,12 @@ public class PlayerMove : MonoBehaviour
         if (mainCamera != null)
         {
             cameraMove = mainCamera.GetComponent<CameraMove>();
+        }
+        
+        // 만약 Main Camera에서 못 찾았으면 전체 검색 (안전장치)
+        if (cameraMove == null)
+        {
+            cameraMove = FindObjectOfType<CameraMove>();
             if (cameraMove == null)
             {
                 Debug.LogWarning("CameraMove 컴포넌트를 찾을 수 없습니다. 1인칭 모드가 제대로 작동하지 않을 수 있습니다.");
@@ -154,95 +160,11 @@ public class PlayerMove : MonoBehaviour
         }
     }
 
-    void LateUpdate()
-    {
-        // FPS 모드에서 회전 강제 고정 (마지막 확인)
-        bool isFirstPerson = cameraMove != null && cameraMove.IsFirstPersonMode;
-        if (isFirstPerson && firstPersonLockedRotation != Quaternion.identity)
-        {
-            transform.rotation = firstPersonLockedRotation;
-        }
-    }
-
-
-    private Quaternion firstPersonLockedRotation;
-    private bool wasFirstPerson = false;
-
     void FixedUpdate()
     {
         // 1인칭 모드 확인
         bool isFirstPerson = cameraMove != null && cameraMove.IsFirstPersonMode;
 
-        // 모드 전환 감지
-        if (isFirstPerson != wasFirstPerson)
-        {
-            if (isFirstPerson)
-            {
-                // 1인칭 모드 진입: 현재 회전 잠금
-                firstPersonLockedRotation = transform.rotation;
-                Debug.Log($"FPS 모드 진입 - 회전 잠금: {firstPersonLockedRotation.eulerAngles}");
-            }
-            else
-            {
-                // 3인칭 모드 복귀
-                firstPersonLockedRotation = Quaternion.identity;
-                Debug.Log("3인칭 모드 복귀");
-            }
-            wasFirstPerson = isFirstPerson;
-        }
-
-        // === FPS 모드 전용 로직 ===
-        if (isFirstPerson)
-        {
-            HandleFirstPersonMovement();
-            return;
-        }
-
-        // === 3인칭 모드 전용 로직 ===
-        HandleThirdPersonMovement();
-    }
-
-    /// <summary>
-    /// FPS 모드 이동 처리 - 회전 없이 좌표만 이동
-    /// </summary>
-    private void HandleFirstPersonMovement()
-    {
-        // 매 프레임 회전 강제 고정 (물리 엔진의 회전도 차단)
-        if (rb != null)
-        {
-            rb.MoveRotation(firstPersonLockedRotation);
-        }
-        transform.rotation = firstPersonLockedRotation;
-
-        // 이동 방향이 없으면 리턴
-        if (moveDirection.sqrMagnitude < 0.0001f)
-            return;
-
-        // 카메라 시점 기준 좌표 이동만 수행
-        Vector3 movement = moveDirection * moveSpeed * Time.fixedDeltaTime;
-
-        if (rb != null)
-        {
-            Vector3 newPosition = rb.position + movement;
-            newPosition.y = fixedYPosition;
-            rb.MovePosition(newPosition);
-            // 이동 후에도 회전 다시 고정
-            rb.MoveRotation(firstPersonLockedRotation);
-        }
-        else
-        {
-            Vector3 newPosition = transform.position + movement;
-            newPosition.y = fixedYPosition;
-            transform.position = newPosition;
-            transform.rotation = firstPersonLockedRotation;
-        }
-    }
-
-    /// <summary>
-    /// 3인칭 모드 이동 처리 - 이동 방향으로 회전
-    /// </summary>
-    private void HandleThirdPersonMovement()
-    {
         // 이동 방향이 없으면 리턴
         if (moveDirection.sqrMagnitude < 0.0001f)
             return;
@@ -265,9 +187,13 @@ public class PlayerMove : MonoBehaviour
             transform.position = newPosition;
         }
 
-        // 이동 방향으로 부드럽게 회전
-        Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+        // 3인칭 모드에서만 이동 방향으로 회전
+        // 1인칭 모드에서는 CameraMove에서 플레이어 회전 처리
+        if (!isFirstPerson)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+        }
     }
 
 }

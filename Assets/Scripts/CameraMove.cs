@@ -169,7 +169,23 @@ public class CameraMove : MonoBehaviour
             firstPersonVerticalAngle -= mouseY * firstPersonSensitivity;
             firstPersonVerticalAngle = Mathf.Clamp(firstPersonVerticalAngle, firstPersonMinVerticalAngle, firstPersonMaxVerticalAngle);
 
-            // 1인칭 모드에서는 플레이어 오브젝트 회전 없음 (시점만 회전)
+            // 플레이어 수평 회전 동기화
+            if (player != null)
+            {
+                Quaternion targetPlayerRotation = Quaternion.Euler(0f, firstPersonHorizontalAngle, 0f);
+                Rigidbody playerRb = player.GetComponent<Rigidbody>();
+                if (playerRb != null)
+                {
+                    // Rigidbody가 있으면 Slerp 후 MoveRotation 사용 (부드러운 회전)
+                    Quaternion smoothRotation = Quaternion.Slerp(player.rotation, targetPlayerRotation, 20f * Time.deltaTime);
+                    playerRb.MoveRotation(smoothRotation);
+                }
+                else
+                {
+                    // Rigidbody가 없으면 Slerp로 부드럽게 회전
+                    player.rotation = Quaternion.Slerp(player.rotation, targetPlayerRotation, 20f * Time.deltaTime);
+                }
+            }
 
             // 1인칭 카메라 위치 설정
             Vector3 targetPosition;
