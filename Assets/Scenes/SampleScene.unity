@@ -213,11 +213,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Roulette
   rouletteObject: {fileID: 1206588900}
-  spinKey: 32
+  spinKey: 113
   partitionCount: 8
-  minSpins: 3
-  maxSpins: 5
-  spinDuration: 4
+  minSpins: 5
+  maxSpins: 10
+  spinDuration: 10
   decelerationPower: 5
   resultText: {fileID: 1718615275}
   spinningMessage: Spinning
@@ -484,6 +484,9 @@ MonoBehaviour:
   firstPersonThreshold: 0.5
   enableMouseRotation: 1
   rotationSpeed: 10
+  rotationSmoothness: 8
+  minVerticalAngle: 10
+  maxVerticalAngle: 80
   firstPersonSensitivity: 10
   firstPersonMinVerticalAngle: -80
   firstPersonMaxVerticalAngle: 80
