@@ -96,6 +96,10 @@ public class GameFlow : MonoBehaviour
     private Transform originalCameraParent;
     private CameraMove cameraMove;
 
+    // glass 포커스 상태 저장 (문을 비추기 전)
+    private Vector3 glassFocusPosition;
+    private Quaternion glassFocusRotation;
+
     // 플레이어 제어
     private PlayerMove playerMove;
 
@@ -104,9 +108,7 @@ public class GameFlow : MonoBehaviour
     private bool isCountdownActive = false;
     private int currentOpenDoorIndex = -1;
 
-    [Header("Debug Settings")]
-    [Tooltip("디버그 모드 (테스트 키 활성화)")]
-    public bool debugMode = true;
+
 
     void Start()
     {
@@ -164,29 +166,7 @@ public class GameFlow : MonoBehaviour
         Debug.Log($"[GameFlow] 설정값 - closedYRotation: {closedYRotation}, openedYRotation: {openedYRotation}, countdownTime: {countdownTime}");
     }
 
-    void Update()
-    {
-        // 디버그 모드: 테스트 키로 문 열기
-        if (debugMode && !isProcessing && doors != null && doors.Length > 0)
-        {
-            // 1~9번 문
-            for (int i = 0; i < Mathf.Min(doors.Length, 9); i++)
-            {
-                if (Input.GetKeyDown(KeyCode.Alpha1 + i))
-                {
-                    Debug.Log($"[디버그] {i + 1}번 키 입력 - {i}번 문 열기 시도");
-                    OpenDoorByRouletteResult(i);
-                }
-            }
 
-            // 0키는 10번 문
-            if (doors.Length >= 10 && Input.GetKeyDown(KeyCode.Alpha0))
-            {
-                Debug.Log($"[디버그] 0번 키 입력 - 9번 문 열기 시도");
-                OpenDoorByRouletteResult(9);
-            }
-        }
-    }
 
     /// <summary>
     /// DoorHead 배열에서 자동으로 DoorData 배열 생성
@@ -403,7 +383,7 @@ public class GameFlow : MonoBehaviour
     }
 
     /// <summary>
-    /// 문 열기 시퀀스 (카메라 이동 -> 문 열기 -> 대기 -> 카메라 복귀 -> 카운트다운)
+    /// 문 열기 시퀀스 (카메라 이동 -> glass 포커스 -> 문 바라보기 -> 문 열기 -> 대기 -> glass 복귀 -> 카메라 복귀 -> 카운트다운)
     /// </summary>
     private IEnumerator OpenDoorSequence(int doorIndex)
     {
@@ -427,24 +407,38 @@ public class GameFlow : MonoBehaviour
             playerMove.FreezePlayer();
         }
 
-        // 3. 카메라를 문으로 이동
-        Debug.Log($"[GameFlow] 3단계: 카메라를 문으로 이동");
+        // 3. 카메라를 glass로 이동 (포커스)
+        Debug.Log($"[GameFlow] 3단계: 카메라를 glass로 이동");
         yield return StartCoroutine(MoveCameraToDoor(door));
 
-        // 4. 문 열기
-        Debug.Log($"[GameFlow] 4단계: 문 열기");
+        // 4. glass 포커스 위치/회전 저장 (문을 비추기 전)
+        Debug.Log($"[GameFlow] 4단계: glass 포커스 상태 저장");
+        glassFocusPosition = mainCamera.transform.position;
+        glassFocusRotation = mainCamera.transform.rotation;
+        Debug.Log($"[GameFlow] glass 포커스 저장: position={glassFocusPosition}, rotation={glassFocusRotation.eulerAngles}");
+
+        // 5. 카메라를 문쪽으로 회전 (위치는 그대로)
+        Debug.Log($"[GameFlow] 5단계: 카메라를 문쪽으로 회전");
+        yield return StartCoroutine(RotateCameraToDoor(door));
+
+        // 6. 문 열기
+        Debug.Log($"[GameFlow] 6단계: 문 열기");
         yield return StartCoroutine(OpenDoor(door));
 
-        // 5. 잠시 대기 (문을 보여줌)
-        Debug.Log($"[GameFlow] 5단계: {cameraFocusTime}초 대기");
+        // 7. 잠시 대기 (문을 보여줌)
+        Debug.Log($"[GameFlow] 7단계: {cameraFocusTime}초 대기");
         yield return new WaitForSeconds(cameraFocusTime);
 
-        // 6. 카메라를 원래 위치로 복귀
-        Debug.Log($"[GameFlow] 6단계: 카메라 복귀");
+        // 8. 카메라를 다시 glass로 회전 복귀
+        Debug.Log($"[GameFlow] 8단계: 카메라를 glass로 회전 복귀");
+        yield return StartCoroutine(RestoreGlassFocus());
+
+        // 9. 카메라를 원래 위치로 복귀
+        Debug.Log($"[GameFlow] 9단계: 카메라 원래 위치로 복귀");
         yield return StartCoroutine(RestoreCameraPosition());
 
-        // 7. 플레이어 동작 재개
-        Debug.Log($"[GameFlow] 7단계: 플레이어 동작 재개");
+        // 10. 플레이어 동작 재개
+        Debug.Log($"[GameFlow] 10단계: 플레이어 동작 재개");
         if (playerMove != null)
         {
             playerMove.UnfreezePlayer();
@@ -455,8 +449,8 @@ public class GameFlow : MonoBehaviour
 
         Debug.Log($"[GameFlow] Door[{doorIndex}] 열기 완료 - isProcessing=false");
 
-        // 8. 30초 카운트다운 시작
-        Debug.Log($"[GameFlow] 8단계: 카운트다운 시작");
+        // 11. 30초 카운트다운 시작
+        Debug.Log($"[GameFlow] 11단계: 카운트다운 시작");
         StartCoroutine(CountdownAndCloseDoor(doorIndex));
     }
 
@@ -698,6 +692,78 @@ public class GameFlow : MonoBehaviour
         isCountdownActive = false;
         currentOpenDoorIndex = -1;
         Debug.Log($"[GameFlow] CountdownAndCloseDoor 종료");
+    }
+
+    /// <summary>
+    /// 카메라를 문쪽으로 회전 (위치는 glass 포커스 위치에서 그대로)
+    /// </summary>
+    private IEnumerator RotateCameraToDoor(DoorData door)
+    {
+        Debug.Log($"[GameFlow] RotateCameraToDoor 시작");
+
+        if (door.body == null)
+        {
+            Debug.LogWarning("[GameFlow] door.body가 없습니다. 카메라 회전 스킵");
+            yield break;
+        }
+
+        // 현재 회전 (glass를 바라보는 상태)
+        Quaternion startRotation = mainCamera.transform.rotation;
+
+        // 목표: 문(Door body)를 바라보도록 회전
+        Vector3 lookDirection = door.body.position - mainCamera.transform.position;
+        Quaternion targetRotation = Quaternion.LookRotation(lookDirection);
+
+        Debug.Log($"[GameFlow] 카메라 회전: glass 방향 -> 문 방향");
+        Debug.Log($"[GameFlow] 문 위치: {door.body.position}");
+        Debug.Log($"[GameFlow] lookDirection: {lookDirection}");
+
+        float elapsed = 0f;
+        float duration = 0.8f; // 회전 시간
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
+
+            mainCamera.transform.rotation = Quaternion.Slerp(startRotation, targetRotation, t);
+
+            yield return null;
+        }
+
+        mainCamera.transform.rotation = targetRotation;
+
+        Debug.Log($"[GameFlow] RotateCameraToDoor 완료");
+    }
+
+    /// <summary>
+    /// 카메라를 다시 glass로 회전 복귀 (위치는 그대로)
+    /// </summary>
+    private IEnumerator RestoreGlassFocus()
+    {
+        Debug.Log($"[GameFlow] RestoreGlassFocus 시작");
+
+        Quaternion startRotation = mainCamera.transform.rotation;
+
+        Debug.Log($"[GameFlow] 카메라 회전: 문 방향 -> glass 방향");
+        Debug.Log($"[GameFlow] 목표 회전: {glassFocusRotation.eulerAngles}");
+
+        float elapsed = 0f;
+        float duration = 0.8f; // 회전 시간
+
+        while (elapsed < duration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.SmoothStep(0f, 1f, elapsed / duration);
+
+            mainCamera.transform.rotation = Quaternion.Slerp(startRotation, glassFocusRotation, t);
+
+            yield return null;
+        }
+
+        mainCamera.transform.rotation = glassFocusRotation;
+
+        Debug.Log($"[GameFlow] RestoreGlassFocus 완료");
     }
 
     /// <summary>

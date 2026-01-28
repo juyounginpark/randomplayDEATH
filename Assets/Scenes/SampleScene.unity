@@ -2217,10 +2217,9 @@ MonoBehaviour:
   cameraDistance: 5
   cameraHeightOffset: 1.5
   cameraDirection: 2
-  countdownTime: 30
+  countdownTime: 10
   countdownText: {fileID: 1718615275}
   rouletteObject: {fileID: 123727657}
-  debugMode: 1
 --- !u!4 &875108823
 Transform:
   m_ObjectHideFlags: 0
