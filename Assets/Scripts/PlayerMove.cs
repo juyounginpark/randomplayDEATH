@@ -50,6 +50,15 @@ public class PlayerMove : MonoBehaviour
     private bool isGrounded;
     private bool jumpRequested;
 
+    // 이동 부드러움
+    [Header("Smoothness Settings")]
+    [Tooltip("즉각 반응 (true: 키 누르면 즉시 이동/멈춤, false: 부드러운 가속)")]
+    public bool instantResponse = true;
+
+    [Tooltip("지면에서 이동 가속도 (instantResponse false일 때만 사용)")]
+    [Range(5f, 50f)]
+    public float groundAcceleration = 20f;
+
     void Start()
     {
         // Rigidbody 컴포넌트 가져오기 (있으면)
@@ -61,13 +70,13 @@ public class PlayerMove : MonoBehaviour
             // 회전만 고정 (Y축 이동은 점프를 위해 자유롭게)
             rb.constraints = RigidbodyConstraints.FreezeRotation;
 
-            // 물리 설정 (충돌 안정성)
+            // 물리 설정 (충돌 안정성 및 부드러운 움직임)
             rb.interpolation = RigidbodyInterpolation.Interpolate;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+            rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
 
             // 질량 및 저항 설정
             rb.mass = 1f;
-            rb.linearDamping = 1f; // 공중에서 약간의 저항
+            rb.linearDamping = 0f; // 저항 제거 (부드러운 이동)
             rb.angularDamping = 999f; // 회전 저항 극대화
 
             // 중력 활성화 (점프를 위해 필요)
@@ -110,7 +119,7 @@ public class PlayerMove : MonoBehaviour
         col = GetComponent<Collider>();
         if (col != null)
         {
-            // Physics Material 생성 (마찰 제거)
+            // Physics Material 생성 (마찰 완전 제거로 떨림 방지)
             PhysicsMaterial physicMat = new PhysicsMaterial("PlayerPhysics");
             physicMat.dynamicFriction = 0f;
             physicMat.staticFriction = 0f;
@@ -120,11 +129,17 @@ public class PlayerMove : MonoBehaviour
 
             col.material = physicMat;
 
-            Debug.Log($"Collider 설정: {col.GetType().Name}, Physics Material 적용");
+            Debug.Log($"Collider 설정: {col.GetType().Name}, Physics Material 적용 (마찰 없음)");
         }
         else
         {
             Debug.LogWarning("Collider가 없습니다! Capsule Collider를 추가하세요.");
+        }
+
+        // 고정된 프레임레이트 설정 확인 (떨림 방지)
+        if (Time.fixedDeltaTime > 0.02f)
+        {
+            Debug.LogWarning($"FixedDeltaTime이 {Time.fixedDeltaTime}초입니다. 부드러운 움직임을 위해 0.02초(50Hz) 이하를 권장합니다.");
         }
     }
 
@@ -206,29 +221,92 @@ public class PlayerMove : MonoBehaviour
         }
 
         // 수평 이동 처리
-        if (moveDirection.sqrMagnitude > 0.0001f)
+        if (rb != null)
         {
-            // 이동 계산
-            Vector3 movement = moveDirection * moveSpeed * Time.fixedDeltaTime;
+            Vector3 targetVelocity;
 
-            // Rigidbody가 있으면 물리 기반 이동
-            if (rb != null)
+            if (instantResponse)
             {
-                Vector3 newPosition = rb.position + movement;
-                rb.MovePosition(newPosition);
+                // 즉각 반응 모드: 키 누르면 즉시 이동, 놓으면 즉시 정지
+                if (moveDirection.sqrMagnitude > 0.0001f)
+                {
+                    // 이동 입력이 있을 때: 즉시 목표 속도로 이동
+                    Vector3 targetHorizontalVelocity = moveDirection * moveSpeed;
+                    targetVelocity = new Vector3(targetHorizontalVelocity.x, rb.linearVelocity.y, targetHorizontalVelocity.z);
+                }
+                else
+                {
+                    // 이동 입력이 없을 때: 즉시 정지 (Y축만 유지)
+                    if (isGrounded)
+                    {
+                        targetVelocity = new Vector3(0f, rb.linearVelocity.y, 0f);
+                    }
+                    else
+                    {
+                        // 공중에서는 수평 속도 약간 유지 (너무 갑작스럽지 않게)
+                        Vector3 currentHorizontal = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
+                        Vector3 dampenedHorizontal = currentHorizontal * 0.95f; // 공중 감속
+                        targetVelocity = new Vector3(dampenedHorizontal.x, rb.linearVelocity.y, dampenedHorizontal.z);
+                    }
+                }
             }
             else
             {
-                // Rigidbody가 없으면 Transform 기반 이동
-                transform.position += movement;
+                // 부드러운 가속 모드
+                Vector3 currentHorizontalVelocity = new Vector3(rb.linearVelocity.x, 0f, rb.linearVelocity.z);
+
+                if (moveDirection.sqrMagnitude > 0.0001f)
+                {
+                    // 이동 입력이 있을 때
+                    Vector3 targetHorizontalVelocity = moveDirection * moveSpeed;
+
+                    // 부드러운 가속 (지면에서는 빠르게, 공중에서는 느리게)
+                    float acceleration = isGrounded ? groundAcceleration : groundAcceleration * 0.3f;
+                    currentHorizontalVelocity = Vector3.MoveTowards(currentHorizontalVelocity, targetHorizontalVelocity, acceleration * Time.fixedDeltaTime);
+
+                    targetVelocity = new Vector3(currentHorizontalVelocity.x, rb.linearVelocity.y, currentHorizontalVelocity.z);
+                }
+                else
+                {
+                    // 이동 입력이 없을 때
+                    if (isGrounded)
+                    {
+                        // 지면에서는 빠르게 감속
+                        currentHorizontalVelocity = Vector3.MoveTowards(currentHorizontalVelocity, Vector3.zero, groundAcceleration * 2f * Time.fixedDeltaTime);
+                        targetVelocity = new Vector3(currentHorizontalVelocity.x, rb.linearVelocity.y, currentHorizontalVelocity.z);
+                    }
+                    else
+                    {
+                        // 공중에서는 수평 속도 유지
+                        targetVelocity = rb.linearVelocity;
+                    }
+                }
             }
+
+            // velocity 설정
+            rb.linearVelocity = targetVelocity;
 
             // 3인칭 모드에서만 이동 방향으로 회전
             // 1인칭 모드에서는 CameraMove에서 플레이어 회전 처리
-            if (!isFirstPerson)
+            if (!isFirstPerson && moveDirection.sqrMagnitude > 0.0001f)
             {
                 Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
                 transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+            }
+        }
+        else
+        {
+            // Rigidbody가 없을 때는 Transform 기반 이동
+            if (moveDirection.sqrMagnitude > 0.0001f)
+            {
+                Vector3 movement = moveDirection * moveSpeed * Time.fixedDeltaTime;
+                transform.position += movement;
+
+                if (!isFirstPerson)
+                {
+                    Quaternion targetRotation = Quaternion.LookRotation(moveDirection, Vector3.up);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSpeed * Time.fixedDeltaTime);
+                }
             }
         }
     }

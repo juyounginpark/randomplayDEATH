@@ -6,8 +6,8 @@ public class CameraMove : MonoBehaviour
 
     [Header("Camera Settings")]
     [Tooltip("카메라 이동 부드러움 정도 (높을수록 빠르게 추적)")]
-    [Range(1f, 20f)]
-    public float smoothSpeed = 10f;
+    [Range(1f, 30f)]
+    public float smoothSpeed = 15f;
 
     [Header("Isometric View Settings")]
     [Tooltip("아이소메트릭 뷰 X축 회전 각도")]
@@ -201,12 +201,12 @@ public class CameraMove : MonoBehaviour
                 targetPosition = player.position + firstPersonOffset;
             }
 
-            // 부드러운 위치 이동 (SmoothDamp 사용)
-            transform.position = Vector3.SmoothDamp(transform.position, targetPosition, ref positionVelocity, 0.05f);
+            // 부드러운 위치 이동 (SmoothDamp 사용 - 매우 빠르게 추적)
+            transform.position = Vector3.SmoothDamp(transform.position, targetPosition, ref positionVelocity, 0.02f);
 
             // 카메라 회전 적용 (부드러운 회전)
             Quaternion targetCameraRotation = Quaternion.Euler(firstPersonVerticalAngle, firstPersonHorizontalAngle, 0f);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetCameraRotation, 20f * Time.deltaTime);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetCameraRotation, 25f * Time.deltaTime);
         }
         else
         {
@@ -266,8 +266,9 @@ public class CameraMove : MonoBehaviour
             // 목표 위치 계산 (플레이어 중앙)
             Vector3 desiredPosition = player.position + offset;
 
-            // 부드러운 이동 (SmoothDamp 사용으로 더 자연스러운 감속/가속)
-            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, 1f / smoothSpeed);
+            // 부드러운 이동 (SmoothDamp 사용 - 빠르고 부드러운 추적)
+            float smoothTime = Mathf.Max(0.03f, 1f / smoothSpeed); // 최소 0.03초 보장
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref positionVelocity, smoothTime);
         }
     }
 
