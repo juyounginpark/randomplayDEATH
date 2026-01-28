@@ -38,6 +38,14 @@ public class Roulette : MonoBehaviour
     [Tooltip("결과 메시지 형식 ({0}에 숫자가 들어감)")]
     public string resultMessageFormat = "결과: {0}번";
 
+    [Header("Game Flow Connection")]
+    [Tooltip("GameFlow 스크립트 (자동으로 찾음)")]
+    public GameFlow gameFlow;
+
+    [Tooltip("룰렛 결과 후 문 열기까지 대기 시간 (초)")]
+    [Range(0f, 5f)]
+    public float delayBeforeOpenDoor = 1f;
+
     private bool isSpinning = false;
     private float partitionAngle;
 
@@ -58,7 +66,21 @@ public class Roulette : MonoBehaviour
             resultText.text = "";
         }
 
-        Debug.Log($"룰렛 초기화 - 파티션: {partitionCount}개, 파티션 각도: {partitionAngle}도");
+        // GameFlow 자동으로 찾기
+        if (gameFlow == null)
+        {
+            gameFlow = FindObjectOfType<GameFlow>();
+            if (gameFlow == null)
+            {
+                Debug.LogWarning("[Roulette] GameFlow를 찾을 수 없습니다! 문이 자동으로 열리지 않습니다.");
+            }
+            else
+            {
+                Debug.Log($"[Roulette] GameFlow 연결 완료: {gameFlow.name}");
+            }
+        }
+
+        Debug.Log($"[Roulette] 룰렛 초기화 - 파티션: {partitionCount}개, 파티션 각도: {partitionAngle}도");
     }
 
     void Update()
@@ -77,10 +99,11 @@ public class Roulette : MonoBehaviour
     {
         if (isSpinning)
         {
-            Debug.Log("이미 회전 중입니다!");
+            Debug.Log("[Roulette] 이미 회전 중입니다!");
             return;
         }
 
+        Debug.Log("[Roulette] 룰렛 회전 시작!");
         StartCoroutine(SpinRoutine());
     }
 
@@ -104,7 +127,7 @@ public class Roulette : MonoBehaviour
         int extraSpins = Random.Range(minSpins, maxSpins + 1);
         float totalRotation = (extraSpins * 360f) + randomAngle;
 
-        Debug.Log($"룰렛 시작 - 목표 랜덤 각도: {randomAngle}도, 총 회전: {totalRotation}도");
+        Debug.Log($"[Roulette] 룰렛 시작 - 목표 랜덤 각도: {randomAngle}도, 총 회전: {totalRotation}도, 회전 수: {extraSpins}바퀴");
 
         // 시작 각도 저장
         float startRotation = rouletteObject.eulerAngles.z;
@@ -145,7 +168,22 @@ public class Roulette : MonoBehaviour
         // 결과 표시
         ShowResult(resultPartition);
 
-        Debug.Log($"룰렛 종료 - 최종 각도: {finalAngle}도, 결과 파티션: {resultPartition}번");
+        Debug.Log($"[Roulette] 룰렛 종료 - 최종 각도: {finalAngle}도, 결과 파티션: {resultPartition}번");
+
+        // 잠시 대기 후 문 열기
+        yield return new WaitForSeconds(delayBeforeOpenDoor);
+
+        // GameFlow에 결과 전달 (파티션 번호를 0부터 시작하는 인덱스로 변환)
+        if (gameFlow != null)
+        {
+            int doorIndex = resultPartition - 1; // 1번 파티션 = 0번 인덱스
+            Debug.Log($"[Roulette] GameFlow에 문 열기 요청: doorIndex={doorIndex} (파티션 {resultPartition}번)");
+            gameFlow.OpenDoorByRouletteResult(doorIndex);
+        }
+        else
+        {
+            Debug.LogWarning("[Roulette] GameFlow가 없어서 문을 열 수 없습니다!");
+        }
 
         isSpinning = false;
     }
@@ -159,8 +197,12 @@ public class Roulette : MonoBehaviour
         {
             resultText.text = string.Format(resultMessageFormat, partition);
         }
+        else
+        {
+            Debug.LogWarning("[Roulette] resultText가 null입니다!");
+        }
 
-        Debug.Log($"룰렛 결과: {partition}번");
+        Debug.Log($"[Roulette] 룰렛 결과: {partition}번");
     }
 
     /// <summary>

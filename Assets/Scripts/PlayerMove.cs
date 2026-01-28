@@ -59,6 +59,9 @@ public class PlayerMove : MonoBehaviour
     [Range(5f, 50f)]
     public float groundAcceleration = 20f;
 
+    // 플레이어 제어 잠금
+    private bool isFrozen = false;
+
     void Start()
     {
         // Rigidbody 컴포넌트 가져오기 (있으면)
@@ -145,6 +148,14 @@ public class PlayerMove : MonoBehaviour
 
     void Update()
     {
+        // Frozen 상태면 모든 입력 무시
+        if (isFrozen)
+        {
+            moveDirection = Vector3.zero;
+            jumpRequested = false;
+            return;
+        }
+
         // WASD 입력 받기
         float horizontal = Input.GetAxis("Horizontal");
         float vertical = Input.GetAxis("Vertical");
@@ -199,6 +210,18 @@ public class PlayerMove : MonoBehaviour
 
     void FixedUpdate()
     {
+        // Frozen 상태면 모든 물리 동작 정지
+        if (isFrozen)
+        {
+            if (rb != null)
+            {
+                // 모든 속도를 0으로 설정 (공중에 있어도 즉시 정지)
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+            return;
+        }
+
         // 1인칭 모드 확인
         bool isFirstPerson = cameraMove != null && cameraMove.IsFirstPersonMode;
 
@@ -331,6 +354,42 @@ public class PlayerMove : MonoBehaviour
 
         // 디버그용 (Scene 뷰에서 확인 가능)
         Debug.DrawRay(origin, Vector3.down * rayDistance, isGrounded ? Color.green : Color.red);
+    }
+
+    /// <summary>
+    /// 플레이어 동작 정지 (외부에서 호출)
+    /// </summary>
+    public void FreezePlayer()
+    {
+        isFrozen = true;
+        moveDirection = Vector3.zero;
+        jumpRequested = false;
+
+        if (rb != null)
+        {
+            // 모든 속도를 즉시 0으로
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+        }
+
+        Debug.Log("[PlayerMove] 플레이어 Freeze - 모든 동작 정지");
+    }
+
+    /// <summary>
+    /// 플레이어 동작 재개 (외부에서 호출)
+    /// </summary>
+    public void UnfreezePlayer()
+    {
+        isFrozen = false;
+        Debug.Log("[PlayerMove] 플레이어 Unfreeze - 동작 재개");
+    }
+
+    /// <summary>
+    /// 현재 Freeze 상태 확인
+    /// </summary>
+    public bool IsFrozen()
+    {
+        return isFrozen;
     }
 
 }
